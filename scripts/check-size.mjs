@@ -10,11 +10,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const budgets = {
-  // Scaffold-stage budget. The README target for 0.1.0 is ≤ 2 KB gzip; the
-  // current throw-stub carries the full JSDoc surface, so we keep a loose
-  // 3 KB ceiling until the real implementation lands and JSDoc compresses
-  // better against repeated tokens.
-  "dist/index.js": 3_000,
+  "dist/index.js": 2_000,
 };
 
 const failures = [];

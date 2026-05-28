@@ -10,17 +10,17 @@
 
 Part of the [ai\*js micro-runtime ecosystem](https://github.com/yshengliao) — see also [aifsmjs](https://github.com/yshengliao/aifsmjs) (FSM), [aiecsjs](https://github.com/yshengliao/aiecsjs) (ECS), [aibridgejs](https://github.com/yshengliao/aibridgejs) (cross-context RPC), [aieventjs](https://github.com/yshengliao/aieventjs) (event emitter), [aipooljs](https://github.com/yshengliao/aipooljs) (object pool), and [aiaudiojs](https://github.com/yshengliao/aiaudiojs) (Web Audio shell).
 
-> **Status: 0.0.1 scaffold.** API surface is frozen below; implementation lands in 0.1.0. `createQuadtree` currently throws `"not implemented"` on call.
+> **Status: 0.1.0 published.** Full implementation shipped: `createQuadtree`, `insert` / `retrieve` / `clear` / `dispose`, Set-based dedup, ≥95% coverage, ≤2 KB gzip.
 
 ---
 
 ## Why aiquadtreejs
 
-Naïve pairwise collision detection on `N` entities is `O(N²)`. At 1,000 entities that's a million comparisons per frame, which at 60 Hz is already a budget killer; at 10,000 entities it's a non-starter. A quadtree replaces the dense outer loop with a spatial filter: each entity asks "who could I possibly collide with?" and the tree returns a small candidate set in `O(log N)` average. The precise hit test then runs only on candidates, dropping the actual comparisons by one or two orders of magnitude.
+Naïve pairwise collision detection on `N` entities is `O(N²)`. At 1,000 entities that's a million comparisons per frame, which at 60 Hz is already a budget killer; at 10,000 entities it's a non-starter. A quadtree replaces the dense outer loop with a spatial filter: each entity asks "who could I possibly collide with?" and the tree returns a small candidate set — sub-linear on average for well-distributed inputs (worst case is `O(N)` when every object overlaps the query region). The precise hit test then runs only on candidates, dropping the actual comparisons by one or two orders of magnitude in typical game distributions.
 
 `aiquadtreejs` makes four deliberate trade-offs:
 
-- **Per-frame rebuild, not move-tracking.** Tracking which leaf an entity migrated into between frames is doable but error-prone; `clear()` + re-`insert()` on a tree that reuses internal node objects is faster in practice and easier to reason about. This mirrors the Kontra.js philosophy.
+- **Per-frame rebuild, not move-tracking.** Tracking which leaf an entity migrated into between frames is doable but error-prone; `clear()` + re-`insert()` is faster in practice and easier to reason about. This mirrors the Kontra.js philosophy. (`clear()` resets the root node and drops the child array; subdividing fresh next frame is cheap because the inner subdivision logic touches at most `maxLevels = 4` levels.)
 - **Set-based dedup on `retrieve`.** An AABB that straddles a quadrant boundary lands in multiple leaves. Without dedup the caller sees the same candidate two or four times and pays double for the precise hit test. The Set guarantees each candidate appears once.
 - **2D AABB only — no 3D, no R-tree, no KD-tree, no Circle / Line primitives.** Those are real techniques for real problems but they sit in a different size class. Keep this library at ≤ 2 KB gzipped and let user-land bring in heavier broadphase when needed.
 - **No precise hit-test.** Broadphase libraries that also do collision response always grow. The contract here ends at "here are the candidates"; pixel-perfect or shape-specific tests belong to whatever physics layer you already have.
@@ -76,7 +76,7 @@ Coordinate semantics match PixiJS `getBounds()`: `x + width` and `y + height` ar
 | `insert()` / `retrieve()` / `clear()` / `dispose()`       | Move-tracking (use `clear()` + re-`insert()`)         |
 | Set-based dedup on `retrieve` (each candidate once)       | Precise hit-test (broadphase only)                    |
 | `maxObjects` + `maxLevels` knobs                          | Auto-rebalance / dynamic depth growth                 |
-| Reuse internal node slots across frames (zero GC churn)   | Circle / Line / polygon primitives                    |
+| Reuse the root node across frames; resubdivide cheaply    | Circle / Line / polygon primitives                    |
 | `dispose()` idempotent; post-dispose calls throw          | Persistence / snapshot / serialise (out of scope)     |
 
 ---

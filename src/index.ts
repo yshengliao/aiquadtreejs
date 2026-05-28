@@ -1,7 +1,7 @@
 // aiquadtreejs — 2D quadtree for per-frame rebuild collision broadphase.
 //
-// v0.0.1 scaffold: types and JSDoc are stable; implementation is intentionally
-// stubbed (`throw`) until 0.1.0 wires up the runtime.
+// v0.1.0: full implementation. Plain-object nodes, iterative-DFS retrieve,
+// Set-based dedup, idempotent dispose, destructurable methods (no `this`).
 
 /**
  * Axis-aligned bounding box.
@@ -108,6 +108,107 @@ export class QuadtreeDisposedError extends Error {
   override readonly name = "QuadtreeDisposedError";
 }
 
+// ---------------------------------------------------------------------------
+// Internal types
+// ---------------------------------------------------------------------------
+
+interface Node<T extends AABB> {
+  bounds: AABB;
+  level: number;
+  objects: T[];
+  children: Node<T>[];
+}
+
+interface State<T extends AABB> {
+  root: Node<T>;
+  maxObjects: number;
+  maxLevels: number;
+  disposed: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+function rectsOverlap(a: AABB, b: AABB): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+function quadrantIndices<T extends AABB>(node: Node<T>, obj: AABB): number[] {
+  const midX = node.bounds.x + node.bounds.width / 2;
+  const midY = node.bounds.y + node.bounds.height / 2;
+  // Zero-extent objects (points) sitting exactly on midX / midY would fall
+  // through both `<` and `>` checks; treat the point as belonging to the
+  // right/bottom side so it doesn't silently disappear.
+  const inLeft = obj.x < midX;
+  const inRight = obj.width === 0 ? obj.x >= midX : obj.x + obj.width > midX;
+  const inTop = obj.y < midY;
+  const inBottom = obj.height === 0 ? obj.y >= midY : obj.y + obj.height > midY;
+  const result: number[] = [];
+  if (inTop && inLeft) result.push(0);
+  if (inTop && inRight) result.push(1);
+  if (inBottom && inLeft) result.push(2);
+  if (inBottom && inRight) result.push(3);
+  return result;
+}
+
+function subdivide<T extends AABB>(node: Node<T>): void {
+  const w = node.bounds.width / 2;
+  const h = node.bounds.height / 2;
+  const x = node.bounds.x;
+  const y = node.bounds.y;
+  const lvl = node.level + 1;
+  node.children.push(
+    { bounds: { x, y, width: w, height: h }, level: lvl, objects: [], children: [] },
+    { bounds: { x: x + w, y, width: w, height: h }, level: lvl, objects: [], children: [] },
+    { bounds: { x, y: y + h, width: w, height: h }, level: lvl, objects: [], children: [] },
+    { bounds: { x: x + w, y: y + h, width: w, height: h }, level: lvl, objects: [], children: [] },
+  );
+  for (const obj of node.objects) {
+    for (const i of quadrantIndices(node, obj)) {
+      const child = node.children[i];
+      if (child !== undefined) child.objects.push(obj);
+    }
+  }
+  node.objects.length = 0;
+}
+
+function insertNode<T extends AABB>(
+  node: Node<T>,
+  obj: T,
+  maxObjects: number,
+  maxLevels: number,
+): void {
+  // Reject objects entirely outside the root bounds; for inner nodes we
+  // trust `quadrantIndices` to route correctly (it has zero-extent fallback
+  // logic that `rectsOverlap` does not, so the strict check is too tight
+  // at child level for points sitting on a child boundary).
+  if (node.level === 0 && !rectsOverlap(node.bounds, obj)) return;
+  if (node.children.length === 4) {
+    for (const i of quadrantIndices(node, obj)) {
+      const child = node.children[i];
+      if (child !== undefined) insertNode(child, obj, maxObjects, maxLevels);
+    }
+    return;
+  }
+  node.objects.push(obj);
+  if (node.objects.length > maxObjects && node.level < maxLevels) {
+    subdivide(node);
+  }
+}
+
+function clearNode<T extends AABB>(node: Node<T>): void {
+  node.objects.length = 0;
+  for (const child of node.children) {
+    clearNode(child);
+  }
+  node.children.length = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
 /**
  * Construct a 2D quadtree.
  *
@@ -144,7 +245,89 @@ export class QuadtreeDisposedError extends Error {
  * @public
  */
 export function createQuadtree<T extends AABB>(opts: QuadtreeOptions): Quadtree<T> {
-  // v0.0.1 scaffold — implementation lands with 0.1.0.
-  void opts;
-  throw new Error("aiquadtreejs: not implemented (v0.0.1 scaffold)");
+  const { bounds } = opts;
+  const maxObjects = opts.maxObjects ?? 10;
+  const maxLevels = opts.maxLevels ?? 4;
+
+  if (
+    !Number.isFinite(bounds.x) ||
+    !Number.isFinite(bounds.y) ||
+    !Number.isFinite(bounds.width) ||
+    !Number.isFinite(bounds.height)
+  ) {
+    throw new QuadtreeError("bounds must contain finite numbers");
+  }
+  if (bounds.width <= 0) {
+    throw new QuadtreeError("bounds.width must be > 0");
+  }
+  if (bounds.height <= 0) {
+    throw new QuadtreeError("bounds.height must be > 0");
+  }
+  if (!Number.isInteger(maxObjects) || maxObjects <= 0) {
+    throw new QuadtreeError("maxObjects must be a positive integer");
+  }
+  if (!Number.isInteger(maxLevels) || maxLevels <= 0) {
+    throw new QuadtreeError("maxLevels must be a positive integer");
+  }
+
+  const state: State<T> = {
+    root: {
+      bounds: { ...bounds },
+      level: 0,
+      objects: [],
+      children: [],
+    },
+    maxObjects,
+    maxLevels,
+    disposed: false,
+  };
+
+  function ck(): void {
+    if (state.disposed) throw new QuadtreeDisposedError("aiquadtreejs: quadtree has been disposed");
+  }
+
+  function insert(obj: T): void {
+    ck();
+    insertNode(state.root, obj, state.maxObjects, state.maxLevels);
+  }
+
+  function retrieve(region: AABB): T[] {
+    ck();
+    const result = new Set<T>();
+    const stack: Node<T>[] = [state.root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (node === undefined) continue;
+      if (!rectsOverlap(node.bounds, region)) continue;
+      for (const obj of node.objects) {
+        result.add(obj);
+      }
+      for (const child of node.children) {
+        stack.push(child);
+      }
+    }
+    return Array.from(result);
+  }
+
+  function clear(): void {
+    ck();
+    clearNode(state.root);
+  }
+
+  function dispose(): void {
+    if (state.disposed) return;
+    state.disposed = true;
+    state.root.objects.length = 0;
+    state.root.children.length = 0;
+  }
+
+  return {
+    insert,
+    retrieve,
+    clear,
+    dispose,
+    get disposed() {
+      return state.disposed;
+    },
+  };
 }

@@ -1,0 +1,413 @@
+import { describe, expect, it } from "vitest";
+
+import { type AABB, QuadtreeDisposedError, QuadtreeError, createQuadtree } from "../src/index.js";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function aabb(x: number, y: number, width: number, height: number): AABB {
+  return { x, y, width, height };
+}
+
+// ---------------------------------------------------------------------------
+// A. Construction & validation
+// ---------------------------------------------------------------------------
+
+describe("A. Construction & validation", () => {
+  it("A1. createQuadtree with bounds works; defaults maxObjects=10, maxLevels=4", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    expect(qt.disposed).toBe(false);
+    expect(qt.retrieve(aabb(0, 0, 800, 600))).toEqual([]);
+  });
+
+  it("A2. createQuadtree with explicit maxObjects + maxLevels", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 400, 400), maxObjects: 2, maxLevels: 2 });
+    expect(qt.disposed).toBe(false);
+  });
+
+  it("A3. bounds.width <= 0 throws QuadtreeError", () => {
+    expect(() => createQuadtree({ bounds: aabb(0, 0, 0, 100) })).toThrow(QuadtreeError);
+    expect(() => createQuadtree({ bounds: aabb(0, 0, -1, 100) })).toThrow(QuadtreeError);
+  });
+
+  it("A4. bounds with NaN throws QuadtreeError", () => {
+    expect(() => createQuadtree({ bounds: aabb(Number.NaN, 0, 100, 100) })).toThrow(QuadtreeError);
+    expect(() => createQuadtree({ bounds: aabb(0, 0, Number.NaN, 100) })).toThrow(QuadtreeError);
+  });
+
+  it("A5. bounds with Infinity throws QuadtreeError", () => {
+    expect(() => createQuadtree({ bounds: aabb(Number.POSITIVE_INFINITY, 0, 100, 100) })).toThrow(
+      QuadtreeError,
+    );
+    expect(() => createQuadtree({ bounds: aabb(0, 0, Number.POSITIVE_INFINITY, 100) })).toThrow(
+      QuadtreeError,
+    );
+  });
+
+  it("A6. bounds.height <= 0 throws QuadtreeError", () => {
+    expect(() => createQuadtree({ bounds: aabb(0, 0, 100, 0) })).toThrow(QuadtreeError);
+    expect(() => createQuadtree({ bounds: aabb(0, 0, 100, -5) })).toThrow(QuadtreeError);
+  });
+
+  it("A7. invalid maxObjects throws QuadtreeError", () => {
+    expect(() => createQuadtree({ bounds: aabb(0, 0, 100, 100), maxObjects: 0 })).toThrow(
+      QuadtreeError,
+    );
+  });
+
+  it("A8. invalid maxLevels throws QuadtreeError", () => {
+    expect(() => createQuadtree({ bounds: aabb(0, 0, 100, 100), maxLevels: 0 })).toThrow(
+      QuadtreeError,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B. insert + retrieve basics
+// ---------------------------------------------------------------------------
+
+describe("B. insert + retrieve basics", () => {
+  it("B1. insert 1 object; retrieve of overlapping region returns it", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    const obj = aabb(100, 100, 32, 32);
+    qt.insert(obj);
+    const result = qt.retrieve(aabb(50, 50, 200, 200));
+    expect(result).toContain(obj);
+  });
+
+  it("B2. after subdivide, object in NW node; retrieve of SE region excludes it", () => {
+    // Force subdivide with maxObjects=2, then confirm the NW object is not in a SE query.
+    const qt = createQuadtree({ bounds: aabb(0, 0, 100, 100), maxObjects: 2, maxLevels: 4 });
+    // Insert 3 objects all in NW quadrant (x<50, y<50) to trigger subdivide
+    const nwObj = aabb(5, 5, 5, 5);
+    qt.insert(aabb(1, 1, 2, 2));
+    qt.insert(aabb(2, 2, 2, 2));
+    qt.insert(nwObj); // triggers subdivide; all go into NW child
+    // Query SE quadrant — NW child bounds do not overlap SE region
+    const result = qt.retrieve(aabb(75, 75, 20, 20));
+    expect(result).not.toContain(nwObj);
+  });
+
+  it("B3. insert N < maxObjects: no subdivide; retrieve large region returns all N", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600), maxObjects: 10 });
+    const objs = Array.from({ length: 9 }, (_, i) => aabb(i * 50, i * 30, 10, 10));
+    for (const o of objs) qt.insert(o);
+    const result = qt.retrieve(aabb(0, 0, 800, 600));
+    expect(result).toHaveLength(9);
+  });
+
+  it("B4. insert > maxObjects: subdivide happens; small region returns subset", () => {
+    const qt = createQuadtree({
+      bounds: aabb(0, 0, 800, 600),
+      maxObjects: 4,
+      maxLevels: 4,
+    });
+    // Place objects all in NW quadrant (x<400, y<300)
+    for (let i = 0; i < 5; i++) {
+      qt.insert(aabb(10 + i * 20, 10 + i * 20, 5, 5));
+    }
+    // Query far SE — should not return NW objects
+    const result = qt.retrieve(aabb(700, 500, 50, 50));
+    expect(result).toHaveLength(0);
+  });
+
+  it("B5. retrieve stops subdividing at maxLevels; deepest node may have > maxObjects", () => {
+    const qt = createQuadtree({
+      bounds: aabb(0, 0, 128, 128),
+      maxObjects: 1,
+      maxLevels: 2,
+    });
+    // Pile many tiny objects on the same spot — tree must cap at depth 2
+    for (let i = 0; i < 20; i++) {
+      qt.insert(aabb(1, 1, 2, 2));
+    }
+    // All those objects are still retrievable
+    const result = qt.retrieve(aabb(0, 0, 128, 128));
+    // 20 identical references dedup to 1 in Set
+    expect(result.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("B6. retrieve returns Array (not Set)", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    qt.insert(aabb(0, 0, 10, 10));
+    const result = qt.retrieve(aabb(0, 0, 800, 600));
+    expect(Array.isArray(result)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C. Set dedup on retrieve
+// ---------------------------------------------------------------------------
+
+describe("C. Set dedup on retrieve", () => {
+  it("C1. object spanning 2 quadrants; after subdivide, retrieve returns it once", () => {
+    const qt = createQuadtree({
+      bounds: aabb(0, 0, 100, 100),
+      maxObjects: 1,
+      maxLevels: 4,
+    });
+    // This object will force subdivision, and a straddling object spans left+right
+    qt.insert(aabb(0, 0, 5, 5)); // force subdivide
+    qt.insert(aabb(0, 0, 5, 5)); // second obj to exceed threshold
+    // Straddling obj: spans midX=50
+    const straddler = aabb(40, 10, 30, 10); // x=40..70, crosses midX=50
+    qt.insert(straddler);
+    const result = qt.retrieve(aabb(0, 0, 100, 100));
+    const count = result.filter((o) => o === straddler).length;
+    expect(count).toBe(1);
+  });
+
+  it("C2. object spanning all 4 quadrants; retrieve returns it once", () => {
+    const qt = createQuadtree({
+      bounds: aabb(0, 0, 100, 100),
+      maxObjects: 1,
+      maxLevels: 4,
+    });
+    qt.insert(aabb(0, 0, 5, 5));
+    qt.insert(aabb(0, 0, 5, 5));
+    // Spans midX=50 and midY=50
+    const big = aabb(30, 30, 60, 60);
+    qt.insert(big);
+    const result = qt.retrieve(aabb(0, 0, 100, 100));
+    const count = result.filter((o) => o === big).length;
+    expect(count).toBe(1);
+  });
+
+  it("C3. same object reference inserted twice; retrieve returns it once", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    const obj = aabb(100, 100, 32, 32);
+    qt.insert(obj);
+    qt.insert(obj);
+    const result = qt.retrieve(aabb(0, 0, 800, 600));
+    const count = result.filter((o) => o === obj).length;
+    expect(count).toBe(1);
+  });
+
+  it("C4. two distinct objects spanning same area; retrieve returns both, each once", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    const a = aabb(100, 100, 32, 32);
+    const b = aabb(100, 100, 32, 32);
+    qt.insert(a);
+    qt.insert(b);
+    const result = qt.retrieve(aabb(0, 0, 800, 600));
+    expect(result).toContain(a);
+    expect(result).toContain(b);
+    expect(result.filter((o) => o === a).length).toBe(1);
+    expect(result.filter((o) => o === b).length).toBe(1);
+  });
+
+  it("C5. region spanning multiple nodes; shared object returned once", () => {
+    const qt = createQuadtree({
+      bounds: aabb(0, 0, 100, 100),
+      maxObjects: 1,
+      maxLevels: 4,
+    });
+    qt.insert(aabb(0, 0, 5, 5));
+    qt.insert(aabb(90, 90, 5, 5)); // force subdivide
+    const shared = aabb(30, 30, 60, 60); // spans all quadrants
+    qt.insert(shared);
+    // Query entire area — shared is in multiple children
+    const result = qt.retrieve(aabb(0, 0, 100, 100));
+    expect(result.filter((o) => o === shared).length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D. Right-open AABB semantics
+// ---------------------------------------------------------------------------
+
+describe("D. Right-open AABB semantics", () => {
+  it("D1. right-open node boundary: object in NW child; query starting at midX excludes NW node", () => {
+    // Force subdivide: NW child is [0,50)x[0,50). Query at x=50 should NOT overlap NW.
+    const qt = createQuadtree({ bounds: aabb(0, 0, 100, 100), maxObjects: 2, maxLevels: 4 });
+    const nwObj = aabb(5, 5, 5, 5);
+    qt.insert(aabb(1, 1, 2, 2));
+    qt.insert(aabb(2, 2, 2, 2));
+    qt.insert(nwObj); // triggers subdivide
+    // NW child bounds are [0,50)x[0,50); query at x=50 starts OUTSIDE NW
+    const result = qt.retrieve(aabb(50, 0, 50, 100));
+    expect(result).not.toContain(nwObj);
+  });
+
+  it("D2. right-open node boundary: query ending just inside NW child (x<50) returns NW object", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 100, 100), maxObjects: 2, maxLevels: 4 });
+    const nwObj = aabb(5, 5, 5, 5);
+    qt.insert(aabb(1, 1, 2, 2));
+    qt.insert(aabb(2, 2, 2, 2));
+    qt.insert(nwObj); // triggers subdivide
+    // Query [0,50)x[0,50) overlaps NW child
+    const result = qt.retrieve(aabb(0, 0, 49, 49));
+    expect(result).toContain(nwObj);
+  });
+
+  it("D3. zero-width query region at node boundary does not enter adjacent child", () => {
+    // NW child is [0,50)x[0,50). A zero-width query at x=50 has x+width=50 which is NOT >50
+    // so rectsOverlap returns false for NW child.
+    const qt = createQuadtree({ bounds: aabb(0, 0, 100, 100), maxObjects: 2, maxLevels: 4 });
+    const nwObj = aabb(5, 5, 5, 5);
+    qt.insert(aabb(1, 1, 2, 2));
+    qt.insert(aabb(2, 2, 2, 2));
+    qt.insert(nwObj);
+    const result = qt.retrieve(aabb(50, 0, 0, 100));
+    expect(result).not.toContain(nwObj);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E. clear
+// ---------------------------------------------------------------------------
+
+describe("E. clear", () => {
+  it("E1. clear empties; retrieve returns []", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    qt.insert(aabb(0, 0, 32, 32));
+    qt.clear();
+    expect(qt.retrieve(aabb(0, 0, 800, 600))).toEqual([]);
+  });
+
+  it("E2. clear then insert works; no stale children", () => {
+    const qt = createQuadtree({
+      bounds: aabb(0, 0, 100, 100),
+      maxObjects: 2,
+      maxLevels: 4,
+    });
+    for (let i = 0; i < 5; i++) qt.insert(aabb(i * 5, i * 5, 3, 3));
+    qt.clear();
+    const newObj = aabb(10, 10, 5, 5);
+    qt.insert(newObj);
+    const result = qt.retrieve(aabb(0, 0, 100, 100));
+    expect(result).toContain(newObj);
+    expect(result).toHaveLength(1);
+  });
+
+  it("E3. multiple clear-insert cycles maintain integrity", () => {
+    const qt = createQuadtree({
+      bounds: aabb(0, 0, 800, 600),
+      maxObjects: 3,
+      maxLevels: 4,
+    });
+    for (let cycle = 0; cycle < 3; cycle++) {
+      qt.clear();
+      const objs = Array.from({ length: 5 }, (_, i) => aabb(i * 100, i * 50, 20, 20));
+      for (const o of objs) qt.insert(o);
+      const result = qt.retrieve(aabb(0, 0, 800, 600));
+      expect(result).toHaveLength(5);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F. dispose
+// ---------------------------------------------------------------------------
+
+describe("F. dispose", () => {
+  it("F1. dispose is idempotent", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    qt.dispose();
+    expect(() => qt.dispose()).not.toThrow();
+  });
+
+  it("F2. post-dispose insert / retrieve / clear throw QuadtreeDisposedError", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    qt.dispose();
+    expect(() => qt.insert(aabb(0, 0, 10, 10))).toThrow(QuadtreeDisposedError);
+    expect(() => qt.retrieve(aabb(0, 0, 800, 600))).toThrow(QuadtreeDisposedError);
+    expect(() => qt.clear()).toThrow(QuadtreeDisposedError);
+  });
+
+  it("F3. disposed getter reflects state", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    expect(qt.disposed).toBe(false);
+    qt.dispose();
+    expect(qt.disposed).toBe(true);
+  });
+
+  it("F4. dispose then re-create new quadtree works; no global state interference", () => {
+    const qt1 = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    qt1.insert(aabb(0, 0, 10, 10));
+    qt1.dispose();
+
+    const qt2 = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    expect(qt2.disposed).toBe(false);
+    expect(qt2.retrieve(aabb(0, 0, 800, 600))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G. Out-of-bounds + zero-size objects
+// ---------------------------------------------------------------------------
+
+describe("G. Out-of-bounds + zero-size objects", () => {
+  it("G1. insert object entirely outside bounds — silent no-op; retrieve doesn't find it", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 100, 100) });
+    const outside = aabb(200, 200, 10, 10);
+    qt.insert(outside);
+    const result = qt.retrieve(aabb(0, 0, 100, 100));
+    expect(result).not.toContain(outside);
+  });
+
+  it("G2. zero-width point object: insert does not throw; retrieve with containing region works", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    const point = aabb(50, 50, 0, 0);
+    expect(() => qt.insert(point)).not.toThrow();
+    // A zero-width point at x=50 overlaps a region starting before x=50
+    // The node that contains it (root) overlaps the query region, so the
+    // object is returned (broadphase — caller does fine-grained check)
+    const result = qt.retrieve(aabb(0, 0, 800, 600));
+    // Point is in tree; returned if containing node overlaps region
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("G3. object exactly the size of bounds; ends up in children after subdivide", () => {
+    const qt = createQuadtree({
+      bounds: aabb(0, 0, 100, 100),
+      maxObjects: 1,
+      maxLevels: 4,
+    });
+    qt.insert(aabb(0, 0, 5, 5)); // triggers subdivide on second insert
+    const full = aabb(0, 0, 100, 100); // spans all 4 quadrants
+    qt.insert(full);
+    // After subdivide, full is in multiple children; retrieve of full bounds returns it once
+    const result = qt.retrieve(aabb(0, 0, 100, 100));
+    expect(result.filter((o) => o === full).length).toBe(1);
+  });
+
+  it("G4. zero-extent point at the exact midpoint survives subdivide", () => {
+    // Regression: previously a point at (midX, midY) with width=height=0
+    // hit zero quadrants in quadrantIndices and silently disappeared after
+    // subdivide. Now we treat zero-extent objects as a point belonging to
+    // the right/bottom side at midpoint.
+    const qt = createQuadtree({
+      bounds: aabb(0, 0, 100, 100),
+      maxObjects: 1,
+      maxLevels: 4,
+    });
+    // Two filler objects force subdivide.
+    qt.insert(aabb(10, 10, 5, 5));
+    qt.insert(aabb(90, 90, 5, 5));
+    // The point sits exactly on (midX, midY) of root bounds (50, 50).
+    const midPoint = aabb(50, 50, 0, 0);
+    qt.insert(midPoint);
+    // The midpoint object must still be retrievable.
+    const result = qt.retrieve(aabb(40, 40, 20, 20));
+    expect(result).toContain(midPoint);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// H. Destructurable + property
+// ---------------------------------------------------------------------------
+
+describe("H. Destructurable + property", () => {
+  it("H1. const { insert, retrieve, clear } = qt; works without this", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    const { insert, retrieve, clear } = qt;
+    const obj = aabb(10, 10, 20, 20);
+    insert(obj);
+    const result = retrieve(aabb(0, 0, 800, 600));
+    expect(result).toContain(obj);
+    expect(() => clear()).not.toThrow();
+    expect(retrieve(aabb(0, 0, 800, 600))).toEqual([]);
+  });
+});

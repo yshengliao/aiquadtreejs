@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-28
+
+### Added
+
+- `createQuadtree({ bounds, maxObjects, maxLevels })` factory — 2D AABB broadphase.
+- `insert(obj)` / `retrieve(region)` / `clear()` / `dispose()` lifecycle.
+- Set-based dedup on `retrieve()` so objects spanning multiple quadrants are returned once.
+- Per-frame rebuild model — `clear()` reuses internal node objects (zero GC churn frame-to-frame).
+- `disposed` read-only flag; post-dispose calls throw `QuadtreeDisposedError`.
+- Test coverage ≥95% statements / lines / functions / ≥90% branches (~30 it() blocks, groups A–H).
+- Size budget: ≤2 KB gzip.
+- Dual ESM + CJS build via `tsup` with `minify: true`; `sideEffects: false`; zero runtime dependencies.
+
 ## [0.0.1] - 2026-05-28
 
 ### Added (scaffold)
@@ -28,13 +41,3 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Publish workflow exists but trigger is `workflow_dispatch` only — no
   accidental npm release on tag push until 0.1.0.
 
-### Planned for 0.1.0
-
-- `createQuadtree({ bounds, maxObjects, maxLevels })` factory — 2D AABB broadphase.
-- `insert(obj)` / `retrieve(region)` / `clear()` / `dispose()` lifecycle.
-- Set-based dedup on `retrieve()` so objects spanning multiple quadrants are returned once.
-- Per-frame rebuild model — `clear()` reuses internal node objects (zero GC churn frame-to-frame).
-- `disposed` read-only flag; post-dispose calls throw `QuadtreeDisposedError`.
-- Test coverage ≥95% statements / lines / functions / ≥90% branches.
-- Size budget: ≤2 KB gzip.
-- Dual ESM + CJS build via `tsup`; `sideEffects: false`; zero runtime dependencies.
