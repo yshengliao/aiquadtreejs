@@ -73,8 +73,37 @@ export interface Quadtree<T extends AABB> {
   retrieve(region: AABB): T[];
 
   /**
-   * Reset every node back to empty. Internal node objects are reused
-   * across frames so per-frame rebuild does not pressure the GC.
+   * Zero-allocation variant of {@link retrieve}.
+   *
+   * Clears `target` (sets `target.length = 0`), walks the tree using the same
+   * iterative DFS + Set-based dedup as {@link retrieve}, then writes every
+   * deduplicated candidate into `target` and returns it.
+   *
+   * Designed for hot-path callers (per-frame broadphase queries in a game
+   * loop) that hold a permanent `T[]` buffer and want to avoid allocating a
+   * fresh result array on every call.
+   *
+   * @invariant `target` identity is preserved — only its contents are
+   *   replaced. `retrieveInto(r, buf) === buf` always holds.
+   * @invariant After return, `target.length` equals the deduplicated
+   *   candidate count. No `undefined` / `null` holes.
+   * @invariant Empty result set → `target.length === 0`.
+   * @invariant Dedup semantics identical to {@link retrieve}: objects
+   *   spanning multiple quadrants appear exactly once.
+   *
+   * Note: `retrieveInto` is not strictly zero-allocation — the internal
+   * dedup `Set<T>` and DFS stack are still allocated per call. What it
+   * eliminates is the result `Array` allocation, which is the largest
+   * frame-to-frame churn item.
+   */
+  retrieveInto(region: AABB, target: T[]): T[];
+
+  /**
+   * Reset the tree to empty. The root node object is reused across
+   * frames; child nodes are released on clear() and re-created next
+   * time subdivision triggers. The per-frame churn is bounded by
+   * `4 * (subdivided-internal-node-count)` and stays well inside V8's
+   * young-generation budget for typical game-loop usage.
    */
   clear(): void;
 
@@ -291,22 +320,30 @@ export function createQuadtree<T extends AABB>(opts: QuadtreeOptions): Quadtree<
     insertNode(state.root, obj, state.maxObjects, state.maxLevels);
   }
 
-  function retrieve(region: AABB): T[] {
-    ck();
+  function retrieveSet(region: AABB): Set<T> {
     const result = new Set<T>();
     const stack: Node<T>[] = [state.root];
     while (stack.length > 0) {
       const node = stack.pop();
       if (node === undefined) continue;
       if (!rectsOverlap(node.bounds, region)) continue;
-      for (const obj of node.objects) {
-        result.add(obj);
-      }
-      for (const child of node.children) {
-        stack.push(child);
-      }
+      for (const obj of node.objects) result.add(obj);
+      for (const child of node.children) stack.push(child);
     }
-    return Array.from(result);
+    return result;
+  }
+
+  function retrieve(region: AABB): T[] {
+    ck();
+    return Array.from(retrieveSet(region));
+  }
+
+  function retrieveInto(region: AABB, target: T[]): T[] {
+    ck();
+    const set = retrieveSet(region);
+    target.length = 0;
+    for (const v of set) target.push(v);
+    return target;
   }
 
   function clear(): void {
@@ -324,6 +361,7 @@ export function createQuadtree<T extends AABB>(opts: QuadtreeOptions): Quadtree<
   return {
     insert,
     retrieve,
+    retrieveInto,
     clear,
     dispose,
     get disposed() {

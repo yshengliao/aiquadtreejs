@@ -10,7 +10,7 @@
 
 隸屬 [ai\*js micro-runtime 生態系](https://github.com/yshengliao) ─ 另見 [aifsmjs](https://github.com/yshengliao/aifsmjs)（FSM）、[aiecsjs](https://github.com/yshengliao/aiecsjs)（ECS）、[aibridgejs](https://github.com/yshengliao/aibridgejs)（cross-context RPC）、[aieventjs](https://github.com/yshengliao/aieventjs)（event emitter）、[aipooljs](https://github.com/yshengliao/aipooljs)（物件池）、[aiaudiojs](https://github.com/yshengliao/aiaudiojs)（Web Audio 薄殼）。
 
-> **狀態：0.0.1 scaffold。** 下方 API surface 已凍結；實作在 0.1.0 落地。目前 `createQuadtree` 被呼叫會直接 `throw "not implemented"`。
+> **狀態：0.3.0 已發佈。** 新增 `retrieveInto(region, target)` 零分配 broadphase 與 property-based 去重不變式驗證。≥95% coverage，≤2 KB gzip。
 
 ---
 
@@ -100,6 +100,7 @@ interface QuadtreeOptions {
 interface Quadtree<T extends AABB> {
   insert(obj: T): void;
   retrieve(region: AABB): T[];
+  retrieveInto(region: AABB, target: T[]): T[];   // ← 0.3.0 新增
   clear(): void;
   dispose(): void;
   readonly disposed: boolean;
@@ -120,8 +121,8 @@ function createQuadtree<T extends AABB>(opts: QuadtreeOptions): Quadtree<T>;
 | 版本       | 加入內容                                                                                                                                |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | **0.1.0**  | `createQuadtree`、`insert` / `retrieve` / `clear` / `dispose`、Set 去重、≥95% coverage、≤2 KB gzip。                                     |
-| **0.2.0**  | opt-in `retrieveInto(target: T[])` ── 寫進呼叫方傳入的 array，省掉每 frame alloc 新 array。                                              |
-| **0.3+**   | 評估與 `aiecsjs` query 的 zero-copy 介接（消費 entity ID 的 `Uint32Array` view，不必經 AABB plain object）。                              |
+| **0.3.0**  | `retrieveInto(region, target)` 零分配 API；property-based 測試（`fast-check`）；`STABILITY.md` API 穩定度追蹤。                           |
+| **0.6+**   | 評估 3D octree 變體（`createOctree<T extends AABB3>`）；現有草稿見 `STABILITY.md`。                                                       |
 
 ---
 

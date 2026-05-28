@@ -23,7 +23,7 @@ The short index lives at `llms.txt` (see https://llmstxt.org/).
 
 Part of the [ai\*js micro-runtime ecosystem](https://github.com/yshengliao) — see also [aifsmjs](https://github.com/yshengliao/aifsmjs) (FSM), [aiecsjs](https://github.com/yshengliao/aiecsjs) (ECS), [aibridgejs](https://github.com/yshengliao/aibridgejs) (cross-context RPC), [aieventjs](https://github.com/yshengliao/aieventjs) (event emitter), [aipooljs](https://github.com/yshengliao/aipooljs) (object pool), and [aiaudiojs](https://github.com/yshengliao/aiaudiojs) (Web Audio shell).
 
-> **Status: 0.1.0 published.** Full implementation shipped: `createQuadtree`, `insert` / `retrieve` / `clear` / `dispose`, Set-based dedup, ≥95% coverage, ≤2 KB gzip.
+> **Status: 0.3.0 published.** Adds `retrieveInto(region, target)` zero-allocation broadphase + property-based dedup invariants. ≥95% coverage, ≤2 KB gzip.
 
 ---
 
@@ -113,6 +113,7 @@ interface QuadtreeOptions {
 interface Quadtree<T extends AABB> {
   insert(obj: T): void;
   retrieve(region: AABB): T[];
+  retrieveInto(region: AABB, target: T[]): T[];   // ← new in 0.3.0
   clear(): void;
   dispose(): void;
   readonly disposed: boolean;
@@ -133,8 +134,8 @@ Full JSDoc lives in [`src/index.ts`](src/index.ts).
 | Version    | Adds                                                                                                                                  |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | **0.1.0**  | `createQuadtree`, `insert` / `retrieve` / `clear` / `dispose`, Set-based dedup, ≥95% coverage, ≤2 KB gzip.                              |
-| **0.2.0**  | Opt-in `retrieveInto(target: T[])` — write into a caller-supplied array to avoid allocating a fresh result every frame.                |
-| **0.3+**   | Evaluate zero-copy interop with `aiecsjs` queries (consume entity ID columns as `Uint32Array` views without an intermediate AABB obj). |
+| **0.3.0**  | `retrieveInto(region, target)` zero-alloc API; property-based tests (`fast-check`); STABILITY.md tracking.                            |
+| **0.6+**   | Evaluate 3D octree variant (`createOctree<T extends AABB3>`); see `STABILITY.md` for current draft.                                  |
 
 ---
 
@@ -153,6 +154,42 @@ All notable changes to this project are documented here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.3.0] - 2026-05-29
+
+### Added
+
+- **`retrieveInto(region: AABB, target: T[]): T[]`** — zero-allocation
+  variant of `retrieve` for hot-path callers. Clears `target`, walks
+  the same iterative DFS + Set dedup as `retrieve`, writes results
+  into `target`, returns `target`. The returned reference equals the
+  argument — callers can hold a permanent buffer and pass it every
+  frame to eliminate the result-array allocation churn (5,000+ calls
+  per frame in typical bullet-hell broadphase loops).
+- **`STABILITY.md`** — explicit stable vs experimental API tracking.
+  Includes a v0.6+ 3D octree draft (no source code in this release).
+- **Property-based tests** via `fast-check` — 4 invariants covering
+  `retrieve` dedup and `retrieveInto` identity / length / content
+  equivalence. Adds `fast-check` to `devDependencies`.
+
+### Changed
+
+- **`Quadtree.clear` JSDoc** — corrected the claim that "internal
+  node objects are reused across frames"; only the root node is
+  reused, child nodes are released on `clear()` and re-created when
+  subdivision next triggers. No runtime behaviour change.
+- **README Roadmap / Status / API sketch** — synced to v0.3.0,
+  including the `retrieveInto(region, target)` signature (the
+  pre-0.2 Roadmap entry was a single-argument draft).
+
+### Notes
+
+- `retrieve` behaviour is byte-for-byte identical to 0.1.1: the
+  internal refactor extracts a shared `retrieveSet` helper that both
+  `retrieve` and `retrieveInto` call, but `Set` insertion order →
+  `Array.from` order is preserved by spec.
+- Bundle size: ≤ 2 KB gzip budget still ~50% headroom after this
+  release (expected ~1050-1090 B gzip).
 
 ## [0.1.1] - 2026-05-28
 

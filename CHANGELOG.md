@@ -6,6 +6,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-29
+
+### Added
+
+- **`retrieveInto(region: AABB, target: T[]): T[]`** — zero-allocation
+  variant of `retrieve` for hot-path callers. Clears `target`, walks
+  the same iterative DFS + Set dedup as `retrieve`, writes results
+  into `target`, returns `target`. The returned reference equals the
+  argument — callers can hold a permanent buffer and pass it every
+  frame to eliminate the result-array allocation churn (5,000+ calls
+  per frame in typical bullet-hell broadphase loops).
+- **`STABILITY.md`** — explicit stable vs experimental API tracking.
+  Includes a v0.6+ 3D octree draft (no source code in this release).
+- **Property-based tests** via `fast-check` — 4 invariants covering
+  `retrieve` dedup and `retrieveInto` identity / length / content
+  equivalence. Adds `fast-check` to `devDependencies`.
+
+### Changed
+
+- **`Quadtree.clear` JSDoc** — corrected the claim that "internal
+  node objects are reused across frames"; only the root node is
+  reused, child nodes are released on `clear()` and re-created when
+  subdivision next triggers. No runtime behaviour change.
+- **README Roadmap / Status / API sketch** — synced to v0.3.0,
+  including the `retrieveInto(region, target)` signature (the
+  pre-0.2 Roadmap entry was a single-argument draft).
+
+### Notes
+
+- `retrieve` behaviour is byte-for-byte identical to 0.1.1: the
+  internal refactor extracts a shared `retrieveSet` helper that both
+  `retrieve` and `retrieveInto` call, but `Set` insertion order →
+  `Array.from` order is preserved by spec.
+- Bundle size: ≤ 2 KB gzip budget still ~50% headroom after this
+  release (expected ~1050-1090 B gzip).
+
 ## [0.1.1] - 2026-05-28
 
 ### Changed (CI)

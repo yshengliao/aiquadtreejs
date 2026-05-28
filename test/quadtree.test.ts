@@ -411,3 +411,152 @@ describe("H. Destructurable + property", () => {
     expect(retrieve(aabb(0, 0, 800, 600))).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// I. retrieveInto behaviour
+// ---------------------------------------------------------------------------
+
+describe("I. retrieveInto behaviour", () => {
+  it("I1. retrieveInto on empty tree → target.length === 0", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    const buf: AABB[] = [];
+    qt.retrieveInto(aabb(0, 0, 800, 600), buf);
+    expect(buf).toHaveLength(0);
+  });
+
+  it("I2. region OOB → target.length === 0", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    qt.insert(aabb(100, 100, 32, 32));
+    const buf: AABB[] = [];
+    qt.retrieveInto(aabb(900, 700, 100, 100), buf);
+    expect(buf).toHaveLength(0);
+  });
+
+  it("I3. pre-filled target gets cleared before write", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    const obj = aabb(100, 100, 32, 32);
+    qt.insert(obj);
+    const stale = aabb(999, 999, 1, 1);
+    const buf: AABB[] = [stale, stale, stale];
+    qt.retrieveInto(aabb(0, 0, 800, 600), buf);
+    expect(buf).not.toContain(stale);
+    expect(buf).toContain(obj);
+  });
+
+  it("I4. empty target [] gets correctly filled", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    const obj = aabb(10, 10, 20, 20);
+    qt.insert(obj);
+    const buf: AABB[] = [];
+    qt.retrieveInto(aabb(0, 0, 800, 600), buf);
+    expect(buf).toContain(obj);
+    expect(buf.length).toBeGreaterThan(0);
+  });
+
+  it("I5. consecutive calls with same buffer reflect latest query", () => {
+    // Use maxObjects=1 to force subdivision so each quadrant is isolated.
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600), maxObjects: 1, maxLevels: 4 });
+    const nw = aabb(10, 10, 20, 20);
+    const se = aabb(700, 500, 20, 20);
+    qt.insert(nw);
+    qt.insert(se);
+    // After insert of 2 objects with maxObjects=1, subdivision is triggered.
+    // nw is in NW quadrant (x<400, y<300); se is in SE quadrant (x>=400, y>=300).
+    const buf: AABB[] = [];
+    qt.retrieveInto(aabb(0, 0, 400, 300), buf);
+    expect(buf).toContain(nw);
+    qt.retrieveInto(aabb(650, 450, 100, 100), buf);
+    expect(buf).toContain(se);
+    // No residue from first call — buf was cleared and refilled for r2
+    expect(buf).not.toContain(nw);
+  });
+
+  it("I6. spanning object appears exactly once in target", () => {
+    const qt = createQuadtree({
+      bounds: aabb(0, 0, 100, 100),
+      maxObjects: 1,
+      maxLevels: 4,
+    });
+    qt.insert(aabb(0, 0, 5, 5));
+    qt.insert(aabb(90, 90, 5, 5));
+    const straddler = aabb(30, 30, 60, 60); // spans all 4 quadrants
+    qt.insert(straddler);
+    const buf: AABB[] = [];
+    qt.retrieveInto(aabb(0, 0, 100, 100), buf);
+    const count = buf.filter((o) => o === straddler).length;
+    expect(count).toBe(1);
+  });
+
+  it("I7. identical reference inserted twice appears exactly once in target", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    const obj = aabb(100, 100, 32, 32);
+    qt.insert(obj);
+    qt.insert(obj);
+    const buf: AABB[] = [];
+    qt.retrieveInto(aabb(0, 0, 800, 600), buf);
+    const count = buf.filter((o) => o === obj).length;
+    expect(count).toBe(1);
+  });
+
+  it("I8. returned reference === provided target", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    const buf: AABB[] = [];
+    const ret = qt.retrieveInto(aabb(0, 0, 800, 600), buf);
+    expect(ret).toBe(buf);
+  });
+
+  it("I9. post-dispose retrieveInto throws QuadtreeDisposedError", () => {
+    const qt = createQuadtree({ bounds: aabb(0, 0, 800, 600) });
+    qt.dispose();
+    const buf: AABB[] = [];
+    expect(() => qt.retrieveInto(aabb(0, 0, 800, 600), buf)).toThrow(QuadtreeDisposedError);
+  });
+
+  it("I10. zero-extent midpoint object retrievable via retrieveInto", () => {
+    const qt = createQuadtree({
+      bounds: aabb(0, 0, 100, 100),
+      maxObjects: 1,
+      maxLevels: 4,
+    });
+    qt.insert(aabb(10, 10, 5, 5));
+    qt.insert(aabb(90, 90, 5, 5));
+    const midPoint = aabb(50, 50, 0, 0);
+    qt.insert(midPoint);
+    const buf: AABB[] = [];
+    qt.retrieveInto(aabb(40, 40, 20, 20), buf);
+    expect(buf).toContain(midPoint);
+  });
+
+  it("I11. retrieveInto result count matches retrieve result count", () => {
+    const qt = createQuadtree({
+      bounds: aabb(0, 0, 800, 600),
+      maxObjects: 4,
+      maxLevels: 4,
+    });
+    for (let i = 0; i < 10; i++) {
+      qt.insert(aabb(i * 60, i * 40, 20, 20));
+    }
+    const region = aabb(0, 0, 400, 300);
+    const buf: AABB[] = [];
+    qt.retrieveInto(region, buf);
+    const arr = qt.retrieve(region);
+    expect(buf.length).toBe(arr.length);
+  });
+
+  it("I12. retrieveInto contents (as Set) equal retrieve contents (as Set)", () => {
+    const qt = createQuadtree({
+      bounds: aabb(0, 0, 800, 600),
+      maxObjects: 4,
+      maxLevels: 4,
+    });
+    for (let i = 0; i < 10; i++) {
+      qt.insert(aabb(i * 60, i * 40, 20, 20));
+    }
+    const region = aabb(0, 0, 800, 600);
+    const buf: AABB[] = [];
+    qt.retrieveInto(region, buf);
+    const arr = qt.retrieve(region);
+    const bufSet = new Set(buf);
+    for (const v of arr) expect(bufSet.has(v)).toBe(true);
+  });
+});
