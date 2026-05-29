@@ -40,7 +40,7 @@ Naïve pairwise collision detection on `N` entities is `O(N²)`. At 1,000 entiti
 
 Why not just import `@timohausmann/quadtree-ts`? That library is solid and you should use it for stand-alone work. `aiquadtreejs` exists so that an ai*js stack can talk to entity IDs from `aiecsjs` without per-frame object adaptation — `insert({ id: eid, x, y, width, height })` lines up with the SoA columns you already maintain.
 
-> `aiquadtreejs` is one of the four 0.3-cycle siblings joining the family — alongside [aipooljs](https://github.com/yshengliao/aipooljs) (object pool), `aieventjs` (typed events; self-built, not a `mitt` fork — see the [evaluation in LEARNINGS.md](../LEARNINGS.md)), and `aiaudiojs` (Web Audio shell over a Howler.js `peerDependency`).
+> `aiquadtreejs` is one of the four 0.3-cycle siblings joining the family — alongside [aipooljs](https://github.com/yshengliao/aipooljs) (object pool), `aieventjs` (typed events; self-built, not a `mitt` fork), and `aiaudiojs` (Web Audio shell over a Howler.js `peerDependency`).
 
 ---
 

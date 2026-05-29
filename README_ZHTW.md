@@ -27,7 +27,7 @@
 
 那為什麼不直接用 `@timohausmann/quadtree-ts`？它做得很好，獨立場景直接用沒問題。`aiquadtreejs` 存在的理由是讓 ai*js stack 能直接接 `aiecsjs` 的 entity ID，不必每 frame 再轉一次物件 ── `insert({ id: eid, x, y, width, height })` 直接對齊你已經維護的 SoA 欄位。
 
-> `aiquadtreejs` 是 v0.3 cycle 四個新加入兄弟套件之一 ── 另外三個是 [aipooljs](https://github.com/yshengliao/aipooljs)（物件池）、`aieventjs`（typed event；**自寫不 fork mitt**，理由見 [LEARNINGS.md 的評估](../LEARNINGS.md)）、`aiaudiojs`（Web Audio 薄殼，底層用 Howler.js 作 `peerDependency`）。
+> `aiquadtreejs` 是 v0.3 cycle 四個新加入兄弟套件之一 ── 另外三個是 [aipooljs](https://github.com/yshengliao/aipooljs)（物件池）、`aieventjs`（typed event；**自寫不 fork mitt**）、`aiaudiojs`（Web Audio 薄殼，底層用 Howler.js 作 `peerDependency`）。
 
 ---
 
